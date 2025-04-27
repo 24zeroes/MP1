@@ -215,9 +215,26 @@ void MP1Node::checkMessages() {
  * DESCRIPTION: Message handler for different message types
  */
 bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-	/*
-	 * Your code goes here
-	 */
+
+    static char s[1024];
+	MessageHdr *hdr = (MessageHdr*) data;
+    char *payload = data + sizeof(MessageHdr);
+
+    Address   addr;
+    int64_t   hb;
+    memcpy(&addr,    payload,                  sizeof(addr));
+    memcpy(&hb,      payload + sizeof(addr),   sizeof(hb));
+    sprintf(s,
+        "RECEIVED type: %d hb: %d from %d.%d.%d.%d:%d\n",
+        hdr->msgType,
+        hb,
+        addr.addr[0],
+        addr.addr[1],
+        addr.addr[2],
+        addr.addr[3],
+        *(short*)(addr.addr + 4));  
+
+    log->LOG(&memberNode->addr, s);
 }
 
 /**

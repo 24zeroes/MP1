@@ -32,5 +32,11 @@ Params.o: Params.cpp Params.h
 Member.o: Member.cpp Member.h
 	g++ -c Member.cpp ${CFLAGS}
 
+Dummy: Dummy.o  MP1Node.o EmulNet.o  Log.o Params.o Member.o  
+	g++ -o Dummy Dummy.o MP1Node.o EmulNet.o Log.o Params.o Member.o ${CFLAGS}
+
+Dummy.o: Dummy.cpp Member.h Log.h Params.h Member.h EmulNet.h Queue.h 
+	g++ -c Dummy.cpp ${CFLAGS}
+
 clean:
-	rm -rf *.o Application dbg.log msgcount.log stats.log machine.log
+	rm -rf *.o Application Dummy dbg.log msgcount.log stats.log machine.log
