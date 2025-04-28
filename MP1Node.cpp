@@ -163,6 +163,8 @@ int MP1Node::finishUpThisNode(){
    /*
     * Your code goes here
     */
+   return 0;
+
 }
 
 /**
@@ -215,8 +217,9 @@ void MP1Node::checkMessages() {
  * DESCRIPTION: Message handler for different message types
  */
 bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-
+#ifdef DEBUGLOG
     static char s[1024];
+#endif
 	MessageHdr *hdr = (MessageHdr*) data;
     char *payload = data + sizeof(MessageHdr);
 
@@ -224,17 +227,31 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     int64_t   hb;
     memcpy(&addr,    payload,                  sizeof(addr));
     memcpy(&hb,      payload + sizeof(addr),   sizeof(hb));
-    sprintf(s,
-        "RECEIVED type: %d hb: %d from %d.%d.%d.%d:%d\n",
+    #ifdef DEBUGLOG 
+    snprintf(s, sizeof s,
+        "RECIEVED type: %d hb: %d from %u.%u.%u.%u:%u\n",
         hdr->msgType,
         hb,
-        addr.addr[0],
-        addr.addr[1],
-        addr.addr[2],
-        addr.addr[3],
-        *(short*)(addr.addr + 4));  
+        (unsigned)addr.addr[0],
+        (unsigned)addr.addr[1],
+        (unsigned)addr.addr[2],
+        (unsigned)addr.addr[3],
+        (unsigned)*(uint16_t*)(addr.addr+4));  
 
     log->LOG(&memberNode->addr, s);
+#endif
+
+    switch (hdr->msgType) {
+        case JOINREQ:
+        // …do something…
+        break;
+        case JOINREP:
+        // …do something else…
+        break;
+        default:
+            std::runtime_error("No type of " + hdr->msgType);
+    }
+    return 1;
 }
 
 /**

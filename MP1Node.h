@@ -9,6 +9,7 @@
 #define _MP1NODE_H_
 
 #include "stdincludes.h"
+#include <cstdint>
 #include "Log.h"
 #include "Params.h"
 #include "Member.h"

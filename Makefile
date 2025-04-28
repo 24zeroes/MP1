@@ -7,7 +7,7 @@
 #* 
 #***********************
 
-CFLAGS =  -Wall -g -std=c++11
+CFLAGS =  -Wall -g -std=c++11 #-O2 -march=x86-64 -O1 -fsanitize=address,undefined -fno-omit-frame-pointer
 
 all: Application
 

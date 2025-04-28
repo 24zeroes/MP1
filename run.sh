@@ -12,7 +12,8 @@ rm -f dbg.*.log
 
 mkdir grade-dir
 cd grade-dir
-wget https://spark-public.s3.amazonaws.com/cloudcomputing/assignments/mp1/mp1.zip || { echo 'ERROR ... Please install wget'; exit 1; }
+#wget https://spark-public.s3.amazonaws.com/cloudcomputing/assignments/mp1/mp1.zip || { echo 'ERROR ... Please install wget'; exit 1; }
+cp ../../mp1.zip mp1.zip 
 unzip mp1.zip || { echo 'ERROR ... Zip file not found' ; exit 1; }
 cd mp1
 cp ../../MP1Node.* .

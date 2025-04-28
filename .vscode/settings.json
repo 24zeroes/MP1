@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "functional": "cpp",
+        "compare": "cpp",
+        "cstdint": "cpp",
+        "stdexcept": "cpp"
+    }
+}
