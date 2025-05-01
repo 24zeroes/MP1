@@ -118,7 +118,6 @@ int MP1Node::initThisNode(Address *joinaddr) {
  * DESCRIPTION: Join the distributed system
  */
 int MP1Node::introduceSelfToGroup(Address *joinaddr) {
-	MessageHdr *msg;
 #ifdef DEBUGLOG
     static char s[1024];
 #endif
@@ -131,13 +130,9 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
         memberNode->inGroup = true;
     }
     else {
-        size_t msgsize = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long) + 1;
-        msg = (MessageHdr *) malloc(msgsize * sizeof(char));
-
-        // create JOINREQ message: format of data is {struct Address myaddr}
-        msg->msgType = JOINREQ;
-        memcpy((char *)(msg+1), &memberNode->addr.addr, sizeof(memberNode->addr.addr));
-        memcpy((char *)(msg+1) + 1 + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(long));
+        
+        std::vector<uint8_t> buf;
+        packJOINREQ(buf, joinaddr);
 
 #ifdef DEBUGLOG
         sprintf(s, "Trying to join...");
@@ -145,13 +140,31 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 #endif
 
         // send JOINREQ message to introducer member
-        emulNet->ENsend(&memberNode->addr, joinaddr, (char *)msg, msgsize);
-
-        free(msg);
+        emulNet->ENsend(&memberNode->addr, joinaddr, 
+            reinterpret_cast<char*>((&buf)->data()), int((&buf)->size()));
     }
 
     return 1;
+}
 
+void MP1Node::packJOINREQ(std::vector<uint8_t> &buf, Address *joinaddr)
+{
+    size_t payloadLen = sizeof(MessageHdr) + sizeof(joinaddr->addr) + sizeof(long) + 1;
+    buf.resize(sizeof(MessageHdr) + sizeof(uint32_t) + payloadLen);
+
+    // 1) header lives at buf.data()
+    auto * hdrPtr = reinterpret_cast<MessageHdr*>(buf.data());
+    hdrPtr->msgType = JOINREQ;
+    // etc...
+
+    // 2) size field
+    auto * sizePtr = reinterpret_cast<uint32_t*>(buf.data() + sizeof(MessageHdr));
+    *sizePtr = uint32_t(payloadLen);
+
+    // 3) payload region
+    uint8_t * dataPtr = buf.data() + sizeof(MessageHdr) + sizeof(uint32_t);
+    memcpy(dataPtr, &memberNode->addr.addr, sizeof(memberNode->addr.addr));
+    memcpy(dataPtr + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(&memberNode->heartbeat));
 }
 
 /**
@@ -216,31 +229,89 @@ void MP1Node::checkMessages() {
  *
  * DESCRIPTION: Message handler for different message types
  */
-bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-	MessageHdr *hdr = (MessageHdr*) data;
-    char *payload = data + sizeof(MessageHdr);
+bool MP1Node::recvCallBack(void *env, char *data, int size) {
+    // 1) Wrap the incoming buffer in a vector
+    std::vector<uint8_t> buf(data, data + size);
 
-    Address   addr;
-    int64_t   hb;
-    memcpy(&addr,    payload,                  sizeof(addr));
-    memcpy(&hb,      payload + sizeof(addr),   sizeof(hb));
-    
-    logMessage(hdr, hb, addr);
-
+    // 2) Peek at the header to see what kind of message this is
+    auto * hdr = reinterpret_cast<const MessageHdr*>(buf.data());
     switch (hdr->msgType) {
-        case JOINREQ:
-        // …do something…
-        break;
-        case JOINREP:
-        // …do something else…
-        break;
-        default:
-            std::runtime_error("No type of " + hdr->msgType);
+      case JOINREQ:
+      {
+        // 3) Unpack the join‐request
+        Address peerAddr;
+        long    peerHB;
+        try {
+          std::tie(peerAddr, peerHB) = unpackJOINREQ(buf);
+          logMessage(hdr, peerHB, peerAddr);
+        } catch (const std::exception &e) {
+          // malformed packet
+          return false;
+        }
+
+        // 4) Now process the JOINREQ: add peerAddr to your member list,
+        //    reply with a JOINREP, etc.
+        //    ...
+        return true;
+      }
+
+      case JOINREP:
+        // unpackJOINREP(buf) if you have one
+        // ...
+        return true;
+
+      // other message‐types...
+      default:
+        // unknown msgType
+        return false;
     }
-    return 1;
 }
 
-void MP1Node::logMessage(MessageHdr *hdr, int64_t hb, Address &addr)
+std::pair<Address,long> 
+MP1Node::unpackJOINREQ(const std::vector<uint8_t> &buf) {
+    // 1) pointer to the header
+    if(buf.size() < sizeof(MessageHdr) + sizeof(uint32_t)) {
+        throw std::runtime_error("buffer too small for JOINREQ");
+    }
+    auto *hdrPtr = reinterpret_cast<const MessageHdr*>(buf.data());
+    if(hdrPtr->msgType != JOINREQ) {
+        throw std::runtime_error("unpackJOINREQ: wrong msgType");
+    }
+
+    // 2) read the payload length
+    auto *sizePtr = reinterpret_cast<const uint32_t*>(
+        buf.data() + sizeof(MessageHdr));
+    uint32_t payloadLen = *sizePtr;
+    size_t expectedTotal = sizeof(MessageHdr)
+                         + sizeof(uint32_t)
+                         + payloadLen;
+    if(buf.size() < expectedTotal) {
+        throw std::runtime_error("buffer shorter than payloadLen");
+    }
+
+    // 3) locate the payload
+    const uint8_t *dataPtr = buf.data()
+                           + sizeof(MessageHdr)
+                           + sizeof(uint32_t);
+
+    // 4) copy out the Address
+    Address addr;
+    static_assert(sizeof(addr.addr) == 6, 
+                  "check your Address.addr size");
+    memcpy(addr.addr,
+                dataPtr,
+                sizeof(addr.addr));
+    
+    // 5) copy out the heartbeat
+    long heartbeat;
+    memcpy(&heartbeat,
+                dataPtr + sizeof(addr.addr),
+                sizeof(heartbeat));
+
+    return { addr, heartbeat };
+}
+
+void MP1Node::logMessage(const MessageHdr *hdr, int64_t hb, Address &addr)
 {
     #ifdef DEBUGLOG
     static char s[1024];

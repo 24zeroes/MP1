@@ -44,6 +44,11 @@ typedef struct MessageHdr {
 	enum MsgTypes msgType;
 }MessageHdr;
 
+typedef struct MemberState {
+	long  heartbeat;
+	int   lastHeardTime;
+}MemberState;
+
 /**
  * CLASS NAME: MP1Node
  *
@@ -66,12 +71,14 @@ public:
 	static int enqueueWrapper(void *env, char *buff, int size);
 	void nodeStart(char *servaddrstr, short serverport);
 	int initThisNode(Address *joinaddr);
-	int introduceSelfToGroup(Address *joinAddress);
-	int finishUpThisNode();
+    int introduceSelfToGroup(Address *joinAddress);
+    void packJOINREQ(vector<uint8_t> &buf, Address *joinaddr);
+    int finishUpThisNode();
 	void nodeLoop();
 	void checkMessages();
     bool recvCallBack(void *env, char *data, int size);
-    void logMessage(MessageHdr *hdr, int64_t hb, Address &addr);
+    std::pair<Address, long> unpackJOINREQ(const std::vector<uint8_t> &buf);
+    void logMessage(const MessageHdr *hdr, int64_t hb, Address &addr);
     void nodeLoopOps();
 	int isNullAddress(Address *addr);
 	Address getJoinAddress();
