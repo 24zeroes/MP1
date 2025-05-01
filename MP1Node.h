@@ -19,7 +19,7 @@
 /**
  * Macros
  */
-#define TREMOVE 20
+#define TREMOVE 10
 #define TFAIL 5
 
 /*
@@ -32,6 +32,7 @@
 enum MsgTypes{
     JOINREQ,
     JOINREP,
+	HEARTBEAT,
     DUMMYLASTMSGTYPE
 };
 
@@ -46,7 +47,7 @@ typedef struct MessageHdr {
 
 typedef struct MemberState {
 	long  heartbeat;
-	int   lastHeardTime;
+	uint   lastHeardTime;
 }MemberState;
 
 /**
@@ -61,6 +62,8 @@ private:
 	Params *par;
 	Member *memberNode;
 	char NULLADDR[6];
+	std::map<Address, MemberState> membership;
+	uint currentTime;
 
 public:
 	MP1Node(Member *, Params *, EmulNet *, Log *, Address *);
@@ -72,16 +75,20 @@ public:
 	void nodeStart(char *servaddrstr, short serverport);
 	int initThisNode(Address *joinaddr);
     int introduceSelfToGroup(Address *joinAddress);
+    std::vector<uint8_t> packHEARTBEAT();
     void packJOINREQ(vector<uint8_t> &buf, Address *joinaddr);
     int finishUpThisNode();
 	void nodeLoop();
 	void checkMessages();
     bool recvCallBack(void *env, char *data, int size);
+    std::vector<uint8_t> packJOINREP();
+    std::vector<std::pair<Address,long>> unpackJOINREP(const std::vector<uint8_t> &buf);
     std::pair<Address, long> unpackJOINREQ(const std::vector<uint8_t> &buf);
     void logMessage(const MessageHdr *hdr, int64_t hb, Address &addr);
     void nodeLoopOps();
-	int isNullAddress(Address *addr);
-	Address getJoinAddress();
+    std::vector<std::pair<Address, long>> unpackHEARTBEAT(const std::vector<uint8_t> &buf);
+    int isNullAddress(Address *addr);
+    Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);
 	void printAddress(Address *addr);
 	virtual ~MP1Node();

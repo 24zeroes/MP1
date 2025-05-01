@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 #**********************
 #*
 #* Progam Name: MP1. Membership Protocol.
@@ -6,7 +7,7 @@
 #* About this file: Grading Script.
 #* 
 #***********************
-#!/bin/sh
+
 
 function contains () {
   	local e

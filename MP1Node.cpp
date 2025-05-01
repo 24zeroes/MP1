@@ -25,6 +25,7 @@ MP1Node::MP1Node(Member *member, Params *params, EmulNet *emul, Log *log, Addres
 	this->log = log;
 	this->par = params;
 	this->memberNode->addr = *address;
+    this->currentTime = params->getcurrtime();
 }
 
 /**
@@ -127,6 +128,8 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 #ifdef DEBUGLOG
         log->LOG(&memberNode->addr, "Starting up group...");
 #endif
+        membership[memberNode->addr] = { memberNode->heartbeat, currentTime };
+        log->logNodeAdd(&memberNode->addr, &memberNode->addr);
         memberNode->inGroup = true;
     }
     else {
@@ -145,6 +148,55 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
     }
 
     return 1;
+}
+
+std::vector<std::pair<Address,long>>
+MP1Node::unpackHEARTBEAT(const std::vector<uint8_t> &buf) {
+    // (very similar to unpackJOINREP but no msgType check for JOINREP)
+    auto *hdr = reinterpret_cast<const MessageHdr*>(buf.data());
+    if (hdr->msgType != HEARTBEAT) throw std::runtime_error("not HB");
+    uint32_t payloadLen = *reinterpret_cast<const uint32_t*>(
+                             buf.data() + sizeof(MessageHdr));
+    const uint8_t *p = buf.data() + sizeof(MessageHdr) + sizeof(uint32_t);
+
+    uint32_t N; memcpy(&N, p, sizeof(N)); p += sizeof(N);
+    constexpr size_t A = sizeof(memberNode->addr.addr);
+    constexpr size_t H = sizeof(memberNode->heartbeat);
+    std::vector<std::pair<Address,long>> out;
+    out.reserve(N);
+
+    for (uint32_t i = 0; i < N; i++) {
+      Address a; long h;
+      memcpy(a.addr, p, A); p += A;
+      memcpy(&h,    p, H); p += H;
+      out.emplace_back(a,h);
+    }
+    return out;
+}
+
+std::vector<uint8_t> MP1Node::packHEARTBEAT() {
+    uint32_t N = membership.size();
+    constexpr size_t A = sizeof(memberNode->addr.addr);
+    constexpr size_t H = sizeof(memberNode->heartbeat);
+    uint32_t payloadLen = sizeof(uint32_t) + N*(A+H);
+
+    std::vector<uint8_t> buf(sizeof(MessageHdr) + sizeof(uint32_t) + payloadLen);
+    auto *hdr = reinterpret_cast<MessageHdr*>(buf.data());
+    hdr->msgType = HEARTBEAT;
+
+    // size field
+    *reinterpret_cast<uint32_t*>(buf.data() + sizeof(MessageHdr))
+      = payloadLen;
+
+    // payload
+    uint8_t *p = buf.data() + sizeof(MessageHdr) + sizeof(uint32_t);
+    memcpy(p, &N, sizeof(N));  p += sizeof(N);
+
+    for (auto &kv : membership) {
+      memcpy(p, kv.first.addr, A);  p += A;
+      memcpy(p, &kv.second.heartbeat, H);  p += H;
+    }
+    return buf;
 }
 
 void MP1Node::packJOINREQ(std::vector<uint8_t> &buf, Address *joinaddr)
@@ -193,11 +245,6 @@ void MP1Node::nodeLoop() {
 
     // Check my messages
     checkMessages();
-
-    // Wait until you're in the group...
-    if( !memberNode->inGroup ) {
-    	return;
-    }
 
     // ...then jump in and share your responsibilites!
     nodeLoopOps();
@@ -249,22 +296,198 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
           return false;
         }
 
-        // 4) Now process the JOINREQ: add peerAddr to your member list,
-        //    reply with a JOINREP, etc.
-        //    ...
-        return true;
+
+        // 1) add to our membership (if not already present)
+        if (membership.find(peerAddr) == membership.end()) {
+            log->logNodeAdd(&memberNode->addr, &peerAddr);
+          }
+          membership[peerAddr] = { peerHB, currentTime };
+  
+          // 2) reply with the full list
+          auto replyBuf = packJOINREP();
+          emulNet->ENsend(&memberNode->addr,
+                          &peerAddr,
+                          reinterpret_cast<char*>(replyBuf.data()),
+                          static_cast<int>(replyBuf.size()));
+          break;
       }
 
-      case JOINREP:
-        // unpackJOINREP(buf) if you have one
-        // ...
-        return true;
+      case JOINREP: {
+        memberNode->inGroup = true;
+        // unpackJOINREP returns a vector of (Address,heartbeat)
+        std::vector<std::pair<Address,long>> members;
+        try {
+          members = unpackJOINREP(buf);
 
+        } catch(...) {
+          return false;
+        }
+
+        // merge them into our map
+        for (auto &pr : members) {
+          Address &addr = pr.first;
+          long hb = pr.second;
+          if (membership.find(addr) == membership.end()) {
+            log->logNodeAdd(&memberNode->addr, &addr);
+          }
+          membership[addr] = { hb, currentTime };
+        }
+        break;
+      }
+
+      case HEARTBEAT: {
+        // wrap raw buffer
+        std::vector<uint8_t> buf(data, data + size);
+        auto entries = unpackHEARTBEAT(buf);
+    
+        for (auto &pr : entries) {
+          const Address &addr = pr.first;
+          long            hb   = pr.second;
+          auto  it = membership.find(addr);
+    
+          if (it == membership.end()) {
+            // new node you’ve never seen
+            log->logNodeAdd(&memberNode->addr, &const_cast<Address&>(addr));
+            membership[addr] = { hb, currentTime };
+          } else {
+            // existing node—update if newer
+            MemberState &st = it->second;
+            if (hb > st.heartbeat) {
+              st.heartbeat     = hb;
+              st.lastHeardTime = currentTime;
+            }
+          }
+        }
+        break;
+    }
       // other message‐types...
       default:
         // unknown msgType
         return false;
     }
+    return true;
+}
+
+// packJOINREP: serialize the entire membership map into a byte buffer
+std::vector<uint8_t> MP1Node::packJOINREP() {
+    // 1) figure out how many members we have
+    uint32_t numMembers = static_cast<uint32_t>(membership.size());
+
+    // 2) each entry is (Address.addr + long heartbeat)
+    constexpr size_t ADDR_SIZE = sizeof(memberNode->addr.addr);
+    constexpr size_t HB_SIZE   = sizeof(memberNode->heartbeat);
+    constexpr size_t ENTRY_SZ  = ADDR_SIZE + HB_SIZE;
+
+    // 3) payload = [ count:uint32_t ] + numMembers * ENTRY_SZ
+    uint32_t payloadLen = sizeof(uint32_t) + numMembers * ENTRY_SZ;
+
+    // 4) total buffer = header + size‐field + payload
+    std::vector<uint8_t> buf;
+    buf.resize(sizeof(MessageHdr)
+             + sizeof(uint32_t)
+             + payloadLen);
+
+    // 5) write the header
+    auto *hdr = reinterpret_cast<MessageHdr*>(buf.data());
+    hdr->msgType = JOINREP;
+
+    // 6) write the payload length
+    auto *szPtr = reinterpret_cast<uint32_t*>(
+        buf.data() + sizeof(MessageHdr));
+    *szPtr = payloadLen;
+
+    // 7) write the payload
+    uint8_t *p = buf.data()
+               + sizeof(MessageHdr)
+               + sizeof(uint32_t);
+
+    // 7a) write count
+    memcpy(p, &numMembers, sizeof(numMembers));
+    p += sizeof(numMembers);
+
+    // 7b) write each (addr, heartbeat)
+    for (auto &kv : membership) {
+        // Address bytes
+        memcpy(p,
+                    kv.first.addr,
+                    ADDR_SIZE);
+        p += ADDR_SIZE;
+
+        // heartbeat
+        memcpy(p,
+                    &kv.second.heartbeat,
+                    HB_SIZE);
+        p += HB_SIZE;
+    }
+
+    return buf;
+}
+
+
+// unpackJOINREP: pull out a vector of (Address,heartbeat) from buf
+std::vector<std::pair<Address,long>>
+MP1Node::unpackJOINREP(const std::vector<uint8_t> &buf) {
+    // minimal size = header + size‐field + count
+    if (buf.size() < sizeof(MessageHdr) + sizeof(uint32_t) + sizeof(uint32_t)) {
+        throw std::runtime_error("unpackJOINREP: buffer too small");
+    }
+
+    // 1) header check
+    auto *hdr = reinterpret_cast<const MessageHdr*>(buf.data());
+    if (hdr->msgType != JOINREP) {
+        throw std::runtime_error("unpackJOINREP: wrong msgType");
+    }
+
+    // 2) payload length
+    auto *szPtr = reinterpret_cast<const uint32_t*>(
+        buf.data() + sizeof(MessageHdr));
+    uint32_t payloadLen = *szPtr;
+
+    // 3) verify the buffer really contains that many bytes
+    size_t totalNeeded = sizeof(MessageHdr)
+                       + sizeof(uint32_t)
+                       + payloadLen;
+    if (buf.size() < totalNeeded) {
+        throw std::runtime_error("unpackJOINREP: truncated payload");
+    }
+
+    // 4) start of payload
+    const uint8_t *p = buf.data()
+                     + sizeof(MessageHdr)
+                     + sizeof(uint32_t);
+
+    // 5) read count
+    uint32_t numMembers;
+    memcpy(&numMembers, p, sizeof(numMembers));
+    p += sizeof(numMembers);
+
+    // 6) each entry size
+    constexpr size_t ADDR_SIZE = sizeof(memberNode->addr.addr);
+    constexpr size_t HB_SIZE   = sizeof(memberNode->heartbeat);
+    constexpr size_t ENTRY_SZ  = ADDR_SIZE + HB_SIZE;
+
+    // sanity: payloadLen should match count*ENTRY_SZ + sizeof(count)
+    if (payloadLen != sizeof(numMembers) + numMembers * ENTRY_SZ) {
+        throw std::runtime_error("unpackJOINREP: bad payloadLen");
+    }
+
+    // 7) extract all entries
+    std::vector<std::pair<Address,long>> members;
+    members.reserve(numMembers);
+    for (uint32_t i = 0; i < numMembers; ++i) {
+        Address addr;
+        long    hb;
+
+        memcpy(addr.addr, p, ADDR_SIZE);
+        p += ADDR_SIZE;
+
+        memcpy(&hb,    p, HB_SIZE);
+        p += HB_SIZE;
+
+        members.emplace_back(addr, hb);
+    }
+
+    return members;
 }
 
 std::pair<Address,long> 
@@ -337,12 +560,69 @@ void MP1Node::logMessage(const MessageHdr *hdr, int64_t hb, Address &addr)
  * 				Propagate your membership list
  */
 void MP1Node::nodeLoopOps() {
+    // 1) Advance your local clock
+    ++currentTime;
 
-	/*
-	 * Your code goes here
-	 */
+    // 2) Bump your own heartbeat and refresh your “last seen” entry
+    memberNode->heartbeat++;
+    membership[memberNode->addr].heartbeat     = memberNode->heartbeat;
+    membership[memberNode->addr].lastHeardTime = currentTime;
 
-    return;
+    // 3) Pack your heartbeat message
+    //    (reuse the same style as packJOINREQ, but with msgType=HEARTBEAT)
+    std::vector<uint8_t> buf;
+    {
+      size_t payloadLen = sizeof(MessageHdr)
+                        + sizeof(memberNode->addr.addr)
+                        + sizeof(memberNode->heartbeat);
+      buf.resize(sizeof(MessageHdr) + sizeof(uint32_t) + payloadLen);
+
+      // Header
+      auto *hdr = reinterpret_cast<MessageHdr*>(buf.data());
+      hdr->msgType = HEARTBEAT;
+      // Size field
+      *reinterpret_cast<uint32_t*>(buf.data() + sizeof(MessageHdr))
+        = uint32_t(payloadLen);
+      // Payload: [ addr | heartbeat ]
+      uint8_t *p = buf.data() + sizeof(MessageHdr) + sizeof(uint32_t);
+      memcpy(p,
+             &memberNode->addr.addr,
+             sizeof(memberNode->addr.addr));
+      memcpy(p + sizeof(memberNode->addr.addr),
+             &memberNode->heartbeat,
+             sizeof(memberNode->heartbeat));
+    }
+
+    // 4) Send that buffer to every other member
+    auto hbBuf = packHEARTBEAT();
+    char * data = reinterpret_cast<char*>(hbBuf.data());
+    int    len  = static_cast<int>(hbBuf.size());
+    
+    for (auto const &kv : membership) {
+        const Address &destKey = kv.first;
+        if (memcmp(destKey.addr, memberNode->addr.addr, sizeof destKey.addr)==0)
+          continue;  // don’t send to yourself
+    
+        // make a local copy so ENsend takes an Address*
+        Address tmp = destKey;
+        emulNet->ENsend(&memberNode->addr, &tmp, data, len);
+    }
+
+    // 5) Failure detection: scan for timeouts
+    std::vector<Address> toRemove;
+    for (auto &kv : membership) {
+      const Address &addr = kv.first;
+      const MemberState &st = kv.second;
+      if (addr == memberNode->addr) continue;
+      if (currentTime - st.lastHeardTime > TFAIL) {
+        toRemove.push_back(addr);
+      }
+    }
+    // 6) Log and erase timed-out members
+    for (auto &bad : toRemove) {
+      log->logNodeRemove(&memberNode->addr, &bad);
+      membership.erase(bad);
+    }
 }
 
 /**
