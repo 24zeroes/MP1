@@ -217,9 +217,6 @@ void MP1Node::checkMessages() {
  * DESCRIPTION: Message handler for different message types
  */
 bool MP1Node::recvCallBack(void *env, char *data, int size ) {
-#ifdef DEBUGLOG
-    static char s[1024];
-#endif
 	MessageHdr *hdr = (MessageHdr*) data;
     char *payload = data + sizeof(MessageHdr);
 
@@ -227,19 +224,8 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
     int64_t   hb;
     memcpy(&addr,    payload,                  sizeof(addr));
     memcpy(&hb,      payload + sizeof(addr),   sizeof(hb));
-    #ifdef DEBUGLOG 
-    snprintf(s, sizeof s,
-        "RECIEVED type: %d hb: %d from %u.%u.%u.%u:%u\n",
-        hdr->msgType,
-        hb,
-        (unsigned)addr.addr[0],
-        (unsigned)addr.addr[1],
-        (unsigned)addr.addr[2],
-        (unsigned)addr.addr[3],
-        (unsigned)*(uint16_t*)(addr.addr+4));  
-
-    log->LOG(&memberNode->addr, s);
-#endif
+    
+    logMessage(hdr, hb, addr);
 
     switch (hdr->msgType) {
         case JOINREQ:
@@ -252,6 +238,24 @@ bool MP1Node::recvCallBack(void *env, char *data, int size ) {
             std::runtime_error("No type of " + hdr->msgType);
     }
     return 1;
+}
+
+void MP1Node::logMessage(MessageHdr *hdr, int64_t hb, Address &addr)
+{
+    #ifdef DEBUGLOG
+    static char s[1024];
+    snprintf(s, sizeof s,
+             "RECIEVED type: %d hb: %d from %u.%u.%u.%u:%u\n",
+             hdr->msgType,
+             hb,
+             (unsigned)addr.addr[0],
+             (unsigned)addr.addr[1],
+             (unsigned)addr.addr[2],
+             (unsigned)addr.addr[3],
+             (unsigned)*(uint16_t *)(addr.addr + 4));
+
+    log->LOG(&memberNode->addr, s);
+    #endif
 }
 
 /**

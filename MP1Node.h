@@ -70,8 +70,9 @@ public:
 	int finishUpThisNode();
 	void nodeLoop();
 	void checkMessages();
-	bool recvCallBack(void *env, char *data, int size);
-	void nodeLoopOps();
+    bool recvCallBack(void *env, char *data, int size);
+    void logMessage(MessageHdr *hdr, int64_t hb, Address &addr);
+    void nodeLoopOps();
 	int isNullAddress(Address *addr);
 	Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);
