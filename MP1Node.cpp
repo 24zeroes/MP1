@@ -443,36 +443,7 @@ void MP1Node::nodeLoopOps() {
     membership[memberNode->addr].heartbeat     = memberNode->heartbeat;
     membership[memberNode->addr].lastHeardTime = currentTime;
 
-    std::vector<uint8_t> buf;
-    {
-      size_t payloadLen = sizeof(MessageHdr)
-                        + sizeof(memberNode->addr.addr)
-                        + sizeof(memberNode->heartbeat);
-      buf.resize(sizeof(MessageHdr) + sizeof(uint32_t) + payloadLen);
-      auto *hdr = reinterpret_cast<MessageHdr*>(buf.data());
-      hdr->msgType = HEARTBEAT;
-      *reinterpret_cast<uint32_t*>(buf.data() + sizeof(MessageHdr))
-        = uint32_t(payloadLen);
-      uint8_t *p = buf.data() + sizeof(MessageHdr) + sizeof(uint32_t);
-      memcpy(p,
-             &memberNode->addr.addr,
-             sizeof(memberNode->addr.addr));
-      memcpy(p + sizeof(memberNode->addr.addr),
-             &memberNode->heartbeat,
-             sizeof(memberNode->heartbeat));
-    }
-    auto hbBuf = packHEARTBEAT();
-    char * data = reinterpret_cast<char*>(hbBuf.data());
-    int    len  = static_cast<int>(hbBuf.size());
     
-    for (auto const &kv : membership) {
-        const Address &destKey = kv.first;
-        if (memcmp(destKey.addr, memberNode->addr.addr, sizeof destKey.addr)==0)
-          continue;
-        Address tmp = destKey;
-        emulNet->ENsend(&memberNode->addr, &tmp, data, len);
-    }
-
     std::vector<Address> toRemove;
     std::vector<Address> toSuspect;
 
@@ -507,6 +478,38 @@ void MP1Node::nodeLoopOps() {
         log->logNodeRemove(&memberNode->addr, &bad);
         membership.erase(bad);
     }
+
+
+    std::vector<uint8_t> buf;
+    {
+      size_t payloadLen = sizeof(MessageHdr)
+                        + sizeof(memberNode->addr.addr)
+                        + sizeof(memberNode->heartbeat);
+      buf.resize(sizeof(MessageHdr) + sizeof(uint32_t) + payloadLen);
+      auto *hdr = reinterpret_cast<MessageHdr*>(buf.data());
+      hdr->msgType = HEARTBEAT;
+      *reinterpret_cast<uint32_t*>(buf.data() + sizeof(MessageHdr))
+        = uint32_t(payloadLen);
+      uint8_t *p = buf.data() + sizeof(MessageHdr) + sizeof(uint32_t);
+      memcpy(p,
+             &memberNode->addr.addr,
+             sizeof(memberNode->addr.addr));
+      memcpy(p + sizeof(memberNode->addr.addr),
+             &memberNode->heartbeat,
+             sizeof(memberNode->heartbeat));
+    }
+    auto hbBuf = packHEARTBEAT();
+    char * data = reinterpret_cast<char*>(hbBuf.data());
+    int    len  = static_cast<int>(hbBuf.size());
+    
+    for (auto const &kv : membership) {
+        const Address &destKey = kv.first;
+        if (memcmp(destKey.addr, memberNode->addr.addr, sizeof destKey.addr)==0)
+          continue;
+        Address tmp = destKey;
+        emulNet->ENsend(&memberNode->addr, &tmp, data, len);
+    }
+
 }
 
 int MP1Node::isNullAddress(Address *addr) {
