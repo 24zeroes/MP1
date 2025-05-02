@@ -50,6 +50,18 @@ typedef struct MemberState {
 	uint   lastHeardTime;
 }MemberState;
 
+typedef struct AddressCompare {
+	bool operator()(const Address &a, Address &b) const {
+	  // raw‐byte lexicographical compare
+	  return memcmp(a.addr, b.addr, sizeof(a.addr)) < 0;
+	}
+
+	bool operator()(const Address &a, const Address &b) const noexcept {
+        // lexicographically compare the raw bytes of the addr array
+        return memcmp(a.addr, b.addr, sizeof(a.addr)) < 0;
+    }
+}AddressCompare;
+
 /**
  * CLASS NAME: MP1Node
  *
@@ -62,7 +74,7 @@ private:
 	Params *par;
 	Member *memberNode;
 	char NULLADDR[6];
-	std::map<Address, MemberState> membership;
+	std::map<Address, MemberState, AddressCompare> membership;
 	uint currentTime;
 
 public:

@@ -613,7 +613,11 @@ void MP1Node::nodeLoopOps() {
     for (auto &kv : membership) {
       const Address &addr = kv.first;
       const MemberState &st = kv.second;
-      if (addr == memberNode->addr) continue;
+      if (memcmp(addr.addr,
+        memberNode->addr.addr,
+        sizeof(addr.addr)) == 0) {
+            continue;       // it’s you, skip sending to yourself
+      }
       if (currentTime - st.lastHeardTime > TFAIL) {
         toRemove.push_back(addr);
       }
