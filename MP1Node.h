@@ -48,9 +48,8 @@ typedef struct MessageHdr {
 typedef struct MemberState {
 	long  heartbeat;
 	uint   lastHeardTime;
-	bool suspected      = false;  // have we already called logNodeRemove?
-	int  suspectedTime  = -1;     // when we first suspected it
-    // default ctor (needed by std::map)
+	bool suspected      = false;
+	int  suspectedTime  = -1;
     MemberState()
       : heartbeat(0),
         lastHeardTime(0),
@@ -113,9 +112,9 @@ public:
     std::vector<uint8_t> packJOINREP();
     std::vector<std::pair<Address,long>> unpackJOINREP(const std::vector<uint8_t> &buf);
     std::pair<Address, long> unpackJOINREQ(const std::vector<uint8_t> &buf);
-    void logMessage(const MessageHdr *hdr, int64_t hb, Address &addr);
+	void logMessage(Address &hbAddress);
     void nodeLoopOps();
-    std::vector<std::pair<Address, long>> unpackHEARTBEAT(const std::vector<uint8_t> &buf);
+    tuple<std::vector<std::pair<Address,long>>, Address> unpackHEARTBEAT(const std::vector<uint8_t> &buf);
     int isNullAddress(Address *addr);
     Address getJoinAddress();
 	void initMemberListTable(Member *memberNode);

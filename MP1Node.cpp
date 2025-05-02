@@ -77,7 +77,7 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
     return 1;
 }
 
-std::vector<std::pair<Address,long>>
+tuple<std::vector<std::pair<Address,long>>, Address>
 MP1Node::unpackHEARTBEAT(const std::vector<uint8_t> &buf) {
     // (very similar to unpackJOINREP but no msgType check for JOINREP)
     auto *hdr = reinterpret_cast<const MessageHdr*>(buf.data());
@@ -98,14 +98,15 @@ MP1Node::unpackHEARTBEAT(const std::vector<uint8_t> &buf) {
       memcpy(&h,    p, H); p += H;
       out.emplace_back(a,h);
     }
-    return out;
+    Address a; memcpy(a.addr, p, A); p += A;
+    return {out, a};
 }
 
 std::vector<uint8_t> MP1Node::packHEARTBEAT() {
     uint32_t N = membership.size();
     constexpr size_t A = sizeof(memberNode->addr.addr);
     constexpr size_t H = sizeof(memberNode->heartbeat);
-    uint32_t payloadLen = sizeof(uint32_t) + N*(A+H);
+    uint32_t payloadLen = sizeof(uint32_t) + N*(A+H) + A;
 
     std::vector<uint8_t> buf(sizeof(MessageHdr) + sizeof(uint32_t) + payloadLen);
     auto *hdr = reinterpret_cast<MessageHdr*>(buf.data());
@@ -123,6 +124,7 @@ std::vector<uint8_t> MP1Node::packHEARTBEAT() {
       memcpy(p, kv.first.addr, A);  p += A;
       memcpy(p, &kv.second.heartbeat, H);  p += H;
     }
+    memcpy(p, memberNode->addr.addr, A);  p += A;
     return buf;
 }
 
@@ -147,6 +149,7 @@ void MP1Node::packJOINREQ(std::vector<uint8_t> &buf, Address *joinaddr)
 }
 
 int MP1Node::finishUpThisNode(){
+   membership.clear();
    return 0;
 }
 
@@ -184,7 +187,6 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
         long    peerHB;
         try {
           std::tie(peerAddr, peerHB) = unpackJOINREQ(buf);
-          logMessage(hdr, peerHB, peerAddr);
         } catch (const std::exception &e) {
           // malformed packet
           return false;
@@ -224,9 +226,12 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
       case HEARTBEAT: {
         // wrap raw buffer
         std::vector<uint8_t> buf(data, data + size);
-        auto entries = unpackHEARTBEAT(buf);
-    
-        for (auto &pr : entries) {
+        tuple<std::vector<std::pair<Address,long>>, Address> res = 
+            unpackHEARTBEAT(buf);
+        Address remoteAddr = std::get<1>(res);
+        logMessage(remoteAddr);
+
+        for (auto &pr : std::get<0>(res)) {
           const Address &addr = pr.first;
           long            hb   = pr.second;
           auto  it = membership.find(addr);
@@ -415,19 +420,18 @@ MP1Node::unpackJOINREQ(const std::vector<uint8_t> &buf) {
     return { addr, heartbeat };
 }
 
-void MP1Node::logMessage(const MessageHdr *hdr, int64_t hb, Address &addr)
+void MP1Node::logMessage(Address &hbAddress)
 {
     #ifdef DEBUGLOG
     static char s[1024];
     snprintf(s, sizeof s,
-             "RECIEVED type: %d hb: %d from %u.%u.%u.%u:%u\n",
-             hdr->msgType,
-             hb,
-             (unsigned)addr.addr[0],
-             (unsigned)addr.addr[1],
-             (unsigned)addr.addr[2],
-             (unsigned)addr.addr[3],
-             (unsigned)*(uint16_t *)(addr.addr + 4));
+             "HB got from %u.%u.%u.%u:%u at %u",
+             (unsigned)hbAddress.addr[0],
+             (unsigned)hbAddress.addr[1],
+             (unsigned)hbAddress.addr[2],
+             (unsigned)hbAddress.addr[3],
+             (unsigned)*(uint16_t *)(hbAddress.addr + 4),
+             (unsigned)par->getcurrtime());
 
     log->LOG(&memberNode->addr, s);
     #endif
