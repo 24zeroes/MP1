@@ -1,21 +1,5 @@
-/**********************************
- * FILE NAME: MP1Node.cpp
- *
- * DESCRIPTION: Membership protocol run by this Node.
- * 				Definition of MP1Node class functions.
- **********************************/
-
 #include "MP1Node.h"
 
-/*
- * Note: You can change/add any functions in MP1Node.{h,cpp}
- */
-
-/**
- * Overloaded Constructor of the MP1Node class
- * You can add new members to the class if you think it
- * is necessary for your logic to work
- */
 MP1Node::MP1Node(Member *member, Params *params, EmulNet *emul, Log *log, Address *address) {
 	for( int i = 0; i < 6; i++ ) {
 		NULLADDR[i] = 0;
@@ -28,17 +12,8 @@ MP1Node::MP1Node(Member *member, Params *params, EmulNet *emul, Log *log, Addres
     this->currentTime = params->getcurrtime();
 }
 
-/**
- * Destructor of the MP1Node class
- */
 MP1Node::~MP1Node() {}
 
-/**
- * FUNCTION NAME: recvLoop
- *
- * DESCRIPTION: This function receives message from the network and pushes into the queue
- * 				This function is called by a node to receive messages currently waiting for it
- */
 int MP1Node::recvLoop() {
     if ( memberNode->bFailed ) {
     	return false;
@@ -48,55 +23,28 @@ int MP1Node::recvLoop() {
     }
 }
 
-/**
- * FUNCTION NAME: enqueueWrapper
- *
- * DESCRIPTION: Enqueue the message from Emulnet into the queue
- */
 int MP1Node::enqueueWrapper(void *env, char *buff, int size) {
 	Queue q;
 	return q.enqueue((queue<q_elt> *)env, (void *)buff, size);
 }
 
-/**
- * FUNCTION NAME: nodeStart
- *
- * DESCRIPTION: This function bootstraps the node
- * 				All initializations routines for a member.
- * 				Called by the application layer.
- */
 void MP1Node::nodeStart(char *servaddrstr, short servport) {
     Address joinaddr;
     joinaddr = getJoinAddress();
 
     // Self booting routines
-    if( initThisNode(&joinaddr) == -1 ) {
-#ifdef DEBUGLOG
-        log->LOG(&memberNode->addr, "init_thisnode failed. Exit.");
-#endif
+    if (initThisNode(&joinaddr) == -1) {
         exit(1);
     }
 
-    if( !introduceSelfToGroup(&joinaddr) ) {
+    if (!introduceSelfToGroup(&joinaddr)) {
         finishUpThisNode();
-#ifdef DEBUGLOG
-        log->LOG(&memberNode->addr, "Unable to join self to group. Exiting.");
-#endif
         exit(1);
     }
-
     return;
 }
 
-/**
- * FUNCTION NAME: initThisNode
- *
- * DESCRIPTION: Find out who I am and start up
- */
 int MP1Node::initThisNode(Address *joinaddr) {
-	/*
-	 * This function is partially implemented and may require changes
-	 */
 	int id = *(int*)(&memberNode->addr.addr);
 	int port = *(short*)(&memberNode->addr.addr[4]);
 
@@ -113,36 +61,15 @@ int MP1Node::initThisNode(Address *joinaddr) {
     return 0;
 }
 
-/**
- * FUNCTION NAME: introduceSelfToGroup
- *
- * DESCRIPTION: Join the distributed system
- */
 int MP1Node::introduceSelfToGroup(Address *joinaddr) {
-#ifdef DEBUGLOG
-    static char s[1024];
-#endif
-
     if ( 0 == memcmp((char *)&(memberNode->addr.addr), (char *)&(joinaddr->addr), sizeof(memberNode->addr.addr))) {
-        // I am the group booter (first process to join the group). Boot up the group
-#ifdef DEBUGLOG
-        log->LOG(&memberNode->addr, "Starting up group...");
-#endif
         membership[memberNode->addr] = { memberNode->heartbeat, currentTime, false, -1 };
         log->logNodeAdd(&memberNode->addr, &memberNode->addr);
         memberNode->inGroup = true;
     }
     else {
-        
         std::vector<uint8_t> buf;
         packJOINREQ(buf, joinaddr);
-
-#ifdef DEBUGLOG
-        sprintf(s, "Trying to join...");
-        log->LOG(&memberNode->addr, s);
-#endif
-
-        // send JOINREQ message to introducer member
         emulNet->ENsend(&memberNode->addr, joinaddr, 
             reinterpret_cast<char*>((&buf)->data()), int((&buf)->size()));
     }
@@ -219,49 +146,25 @@ void MP1Node::packJOINREQ(std::vector<uint8_t> &buf, Address *joinaddr)
     memcpy(dataPtr + sizeof(memberNode->addr.addr), &memberNode->heartbeat, sizeof(&memberNode->heartbeat));
 }
 
-/**
- * FUNCTION NAME: finishUpThisNode
- *
- * DESCRIPTION: Wind up this node and clean up state
- */
 int MP1Node::finishUpThisNode(){
-   /*
-    * Your code goes here
-    */
    return 0;
-
 }
 
-/**
- * FUNCTION NAME: nodeLoop
- *
- * DESCRIPTION: Executed periodically at each member
- * 				Check your messages in queue and perform membership protocol duties
- */
 void MP1Node::nodeLoop() {
     if (memberNode->bFailed) {
     	return;
     }
-
-    // Check my messages
     checkMessages();
-
-    // ...then jump in and share your responsibilites!
+    if( !memberNode->inGroup ) {
+    	return;
+    }
     nodeLoopOps();
-
     return;
 }
 
-/**
- * FUNCTION NAME: checkMessages
- *
- * DESCRIPTION: Check messages in the queue and call the respective message handler
- */
 void MP1Node::checkMessages() {
     void *ptr;
     int size;
-
-    // Pop waiting messages from memberNode's mp1q
     while ( !memberNode->mp1q.empty() ) {
     	ptr = memberNode->mp1q.front().elt;
     	size = memberNode->mp1q.front().size;
@@ -271,21 +174,12 @@ void MP1Node::checkMessages() {
     return;
 }
 
-/**
- * FUNCTION NAME: recvCallBack
- *
- * DESCRIPTION: Message handler for different message types
- */
 bool MP1Node::recvCallBack(void *env, char *data, int size) {
-    // 1) Wrap the incoming buffer in a vector
     std::vector<uint8_t> buf(data, data + size);
-
-    // 2) Peek at the header to see what kind of message this is
     auto * hdr = reinterpret_cast<const MessageHdr*>(buf.data());
     switch (hdr->msgType) {
       case JOINREQ:
       {
-        // 3) Unpack the join‐request
         Address peerAddr;
         long    peerHB;
         try {
@@ -295,26 +189,20 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
           // malformed packet
           return false;
         }
-
-
-        // 1) add to our membership (if not already present)
         if (membership.find(peerAddr) == membership.end()) {
             log->logNodeAdd(&memberNode->addr, &peerAddr);
-          }
-          membership[peerAddr] = { peerHB, currentTime, false, -1 };
-  
-          // 2) reply with the full list
-          auto replyBuf = packJOINREP();
-          emulNet->ENsend(&memberNode->addr,
-                          &peerAddr,
-                          reinterpret_cast<char*>(replyBuf.data()),
-                          static_cast<int>(replyBuf.size()));
-          break;
+        }
+        membership[peerAddr] = { peerHB, currentTime, false, -1 };
+        auto replyBuf = packJOINREP();
+        emulNet->ENsend(&memberNode->addr,
+                        &peerAddr,
+                        reinterpret_cast<char*>(replyBuf.data()),
+                        static_cast<int>(replyBuf.size()));
+        break;
       }
 
       case JOINREP: {
         memberNode->inGroup = true;
-        // unpackJOINREP returns a vector of (Address,heartbeat)
         std::vector<std::pair<Address,long>> members;
         try {
           members = unpackJOINREP(buf);
@@ -322,8 +210,6 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
         } catch(...) {
           return false;
         }
-
-        // merge them into our map
         for (auto &pr : members) {
           Address &addr = pr.first;
           long hb = pr.second;
@@ -360,15 +246,12 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
         }
         break;
     }
-      // other message‐types...
       default:
-        // unknown msgType
         return false;
     }
     return true;
 }
 
-// packJOINREP: serialize the entire membership map into a byte buffer
 std::vector<uint8_t> MP1Node::packJOINREP() {
     // 1) figure out how many members we have
     uint32_t numMembers = static_cast<uint32_t>(membership.size());
@@ -423,8 +306,6 @@ std::vector<uint8_t> MP1Node::packJOINREP() {
     return buf;
 }
 
-
-// unpackJOINREP: pull out a vector of (Address,heartbeat) from buf
 std::vector<std::pair<Address,long>>
 MP1Node::unpackJOINREP(const std::vector<uint8_t> &buf) {
     // minimal size = header + size‐field + count
@@ -552,38 +433,22 @@ void MP1Node::logMessage(const MessageHdr *hdr, int64_t hb, Address &addr)
     #endif
 }
 
-/**
- * FUNCTION NAME: nodeLoopOps
- *
- * DESCRIPTION: Check if any node hasn't responded within a timeout period and then delete
- * 				the nodes
- * 				Propagate your membership list
- */
 void MP1Node::nodeLoopOps() {
-    // 1) Advance your local clock
     ++currentTime;
-
-    // 2) Bump your own heartbeat and refresh your “last seen” entry
     memberNode->heartbeat++;
     membership[memberNode->addr].heartbeat     = memberNode->heartbeat;
     membership[memberNode->addr].lastHeardTime = currentTime;
 
-    // 3) Pack your heartbeat message
-    //    (reuse the same style as packJOINREQ, but with msgType=HEARTBEAT)
     std::vector<uint8_t> buf;
     {
       size_t payloadLen = sizeof(MessageHdr)
                         + sizeof(memberNode->addr.addr)
                         + sizeof(memberNode->heartbeat);
       buf.resize(sizeof(MessageHdr) + sizeof(uint32_t) + payloadLen);
-
-      // Header
       auto *hdr = reinterpret_cast<MessageHdr*>(buf.data());
       hdr->msgType = HEARTBEAT;
-      // Size field
       *reinterpret_cast<uint32_t*>(buf.data() + sizeof(MessageHdr))
         = uint32_t(payloadLen);
-      // Payload: [ addr | heartbeat ]
       uint8_t *p = buf.data() + sizeof(MessageHdr) + sizeof(uint32_t);
       memcpy(p,
              &memberNode->addr.addr,
@@ -592,8 +457,6 @@ void MP1Node::nodeLoopOps() {
              &memberNode->heartbeat,
              sizeof(memberNode->heartbeat));
     }
-
-    // 4) Send that buffer to every other member
     auto hbBuf = packHEARTBEAT();
     char * data = reinterpret_cast<char*>(hbBuf.data());
     int    len  = static_cast<int>(hbBuf.size());
@@ -601,14 +464,11 @@ void MP1Node::nodeLoopOps() {
     for (auto const &kv : membership) {
         const Address &destKey = kv.first;
         if (memcmp(destKey.addr, memberNode->addr.addr, sizeof destKey.addr)==0)
-          continue;  // don’t send to yourself
-    
-        // make a local copy so ENsend takes an Address*
+          continue;
         Address tmp = destKey;
         emulNet->ENsend(&memberNode->addr, &tmp, data, len);
     }
 
-    // 5) Failure detection: scan for timeouts
     std::vector<Address> toRemove;
     std::vector<Address> toSuspect;
 
@@ -618,18 +478,16 @@ void MP1Node::nodeLoopOps() {
       if (memcmp(addr.addr,
         memberNode->addr.addr,
         sizeof(addr.addr)) == 0) {
-            continue;       // it’s you, skip sending to yourself
+            continue;
       }
 
       int silent = currentTime - st.lastHeardTime;
       if (!st.suspected && silent > TFAIL) {
-        // 1a) first time we cross T_FAIL → suspect it
         st.suspected     = true;
         st.suspectedTime = currentTime;
         toSuspect.push_back(addr);
     
       } else if (st.suspected && (currentTime - st.suspectedTime > T_CLEANUP)) {
-        // 1b) it’s been suspected for > T_CLEANUP → now fully erase
         toRemove.push_back(addr);
       }
     }
@@ -637,28 +495,20 @@ void MP1Node::nodeLoopOps() {
     // 6) Log and erase timed-out members
     for (auto &bad : toSuspect) {
         log->logNodeRemove(&memberNode->addr, &bad);
+        membership.erase(bad);
       }
       
       // 3) Finally, erase them from your map after T_CLEANUP
       for (auto &bad : toRemove) {
+        log->logNodeRemove(&memberNode->addr, &bad);
         membership.erase(bad);
     }
 }
 
-/**
- * FUNCTION NAME: isNullAddress
- *
- * DESCRIPTION: Function checks if the address is NULL
- */
 int MP1Node::isNullAddress(Address *addr) {
 	return (memcmp(addr->addr, NULLADDR, 6) == 0 ? 1 : 0);
 }
 
-/**
- * FUNCTION NAME: getJoinAddress
- *
- * DESCRIPTION: Returns the Address of the coordinator
- */
 Address MP1Node::getJoinAddress() {
     Address joinaddr;
 
@@ -669,20 +519,10 @@ Address MP1Node::getJoinAddress() {
     return joinaddr;
 }
 
-/**
- * FUNCTION NAME: initMemberListTable
- *
- * DESCRIPTION: Initialize the membership list
- */
 void MP1Node::initMemberListTable(Member *memberNode) {
 	memberNode->memberList.clear();
 }
 
-/**
- * FUNCTION NAME: printAddress
- *
- * DESCRIPTION: Print the Address
- */
 void MP1Node::printAddress(Address *addr)
 {
     printf("%d.%d.%d.%d:%d \n",  addr->addr[0],addr->addr[1],addr->addr[2],
