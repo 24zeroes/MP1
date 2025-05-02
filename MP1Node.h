@@ -19,7 +19,7 @@
 /**
  * Macros
  */
-#define TREMOVE 10
+#define T_CLEANUP  10
 #define TFAIL 5
 
 /*
@@ -48,6 +48,23 @@ typedef struct MessageHdr {
 typedef struct MemberState {
 	long  heartbeat;
 	uint   lastHeardTime;
+	bool suspected      = false;  // have we already called logNodeRemove?
+	int  suspectedTime  = -1;     // when we first suspected it
+    // default ctor (needed by std::map)
+    MemberState()
+      : heartbeat(0),
+        lastHeardTime(0),
+        suspected(false),
+        suspectedTime(-1)
+    {}
+
+    // convenience ctor
+    MemberState(long hb, int lastTime, bool isSuspected, int suspectTime)
+      : heartbeat(hb),
+        lastHeardTime(lastTime),
+        suspected(isSuspected),
+        suspectedTime(suspectTime)
+    {}
 }MemberState;
 
 typedef struct AddressCompare {

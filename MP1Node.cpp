@@ -128,7 +128,7 @@ int MP1Node::introduceSelfToGroup(Address *joinaddr) {
 #ifdef DEBUGLOG
         log->LOG(&memberNode->addr, "Starting up group...");
 #endif
-        membership[memberNode->addr] = { memberNode->heartbeat, currentTime };
+        membership[memberNode->addr] = { memberNode->heartbeat, currentTime, false, -1 };
         log->logNodeAdd(&memberNode->addr, &memberNode->addr);
         memberNode->inGroup = true;
     }
@@ -301,7 +301,7 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
         if (membership.find(peerAddr) == membership.end()) {
             log->logNodeAdd(&memberNode->addr, &peerAddr);
           }
-          membership[peerAddr] = { peerHB, currentTime };
+          membership[peerAddr] = { peerHB, currentTime, false, -1 };
   
           // 2) reply with the full list
           auto replyBuf = packJOINREP();
@@ -330,7 +330,7 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
           if (membership.find(addr) == membership.end()) {
             log->logNodeAdd(&memberNode->addr, &addr);
           }
-          membership[addr] = { hb, currentTime };
+          membership[addr] = { hb, currentTime, false, -1 };
         }
         break;
       }
@@ -348,7 +348,7 @@ bool MP1Node::recvCallBack(void *env, char *data, int size) {
           if (it == membership.end()) {
             // new node you’ve never seen
             log->logNodeAdd(&memberNode->addr, &const_cast<Address&>(addr));
-            membership[addr] = { hb, currentTime };
+            membership[addr] = MemberState { hb, currentTime, false, -1 };
           } else {
             // existing node—update if newer
             MemberState &st = it->second;
@@ -610,22 +610,38 @@ void MP1Node::nodeLoopOps() {
 
     // 5) Failure detection: scan for timeouts
     std::vector<Address> toRemove;
+    std::vector<Address> toSuspect;
+
     for (auto &kv : membership) {
       const Address &addr = kv.first;
-      const MemberState &st = kv.second;
+      MemberState &st = kv.second;
       if (memcmp(addr.addr,
         memberNode->addr.addr,
         sizeof(addr.addr)) == 0) {
             continue;       // it’s you, skip sending to yourself
       }
-      if (currentTime - st.lastHeardTime > TFAIL) {
+
+      int silent = currentTime - st.lastHeardTime;
+      if (!st.suspected && silent > TFAIL) {
+        // 1a) first time we cross T_FAIL → suspect it
+        st.suspected     = true;
+        st.suspectedTime = currentTime;
+        toSuspect.push_back(addr);
+    
+      } else if (st.suspected && (currentTime - st.suspectedTime > T_CLEANUP)) {
+        // 1b) it’s been suspected for > T_CLEANUP → now fully erase
         toRemove.push_back(addr);
       }
     }
+
     // 6) Log and erase timed-out members
-    for (auto &bad : toRemove) {
-      log->logNodeRemove(&memberNode->addr, &bad);
-      membership.erase(bad);
+    for (auto &bad : toSuspect) {
+        log->logNodeRemove(&memberNode->addr, &bad);
+      }
+      
+      // 3) Finally, erase them from your map after T_CLEANUP
+      for (auto &bad : toRemove) {
+        membership.erase(bad);
     }
 }
 
